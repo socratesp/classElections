@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Class Elections · Student Vote</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+      background: linear-gradient(145deg, #f7f9fc 0%, #e9eef4 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .app-container {
+      max-width: 1000px;
+      width: 100%;
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(12px);
+      border-radius: 40px;
+      box-shadow: 0 25px 50px -8px rgba(0, 20, 30, 0.25), inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+      padding: 32px 36px;
+    }
+
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 600;
+      color: #1e2b3c;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+      border-bottom: 3px solid #cbd5e1;
+      padding-bottom: 16px;
+    }
+
+    h1 span {
+      background: #1e2b3c;
+      color: white;
+      font-size: 1.2rem;
+      padding: 4px 14px;
+      border-radius: 100px;
+      font-weight: 500;
+      margin-left: auto;
+    }
+
+    .setup-panel { display: flex; flex-direction: column; gap: 28px; }
+
+    .candidate-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      min-height: 70px;
+      padding: 12px 0;
+      border-bottom: 1px dashed #b9c7d9;
+      align-items: center;
+    }
+
+    .candidate-pill {
+      background: #fff;
+      border-radius: 60px;
+      padding: 10px 20px;
+      font-weight: 500;
+      color: #1e2b3c;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.02), 0 0 0 1px #d0dae8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      animation: pop 0.2s ease;
+    }
+
+    .candidate-pill::before { content: "👤"; font-size: 1rem; opacity: 0.7; }
+
+    .empty-message { color: #7a8b9f; font-style: italic; padding: 6px 0; font-size: 1.1rem; }
+
+    .add-section { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+
+    .add-section input[type="text"] {
+      flex: 2;
+      min-width: 200px;
+      padding: 16px 22px;
+      border: 2px solid #d9e2ef;
+      border-radius: 60px;
+      font-size: 1rem;
+      background: white;
+      transition: 0.15s;
+      outline: none;
+    }
+
+    .add-section input[type="text"]:focus {
+      border-color: #3b6ea5;
+      box-shadow: 0 0 0 4px rgba(59, 110, 165, 0.15);
+    }
+
+    .btn {
+      border: none;
+      background: white;
+      padding: 14px 30px;
+      border-radius: 60px;
+      font-weight: 600;
+      font-size: 1rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      transition: 0.15s;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.03), 0 0 0 1px #cbd5e1;
+      color: #1e2b3c;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: #1e2b3c;
+      color: white;
+      box-shadow: 0 10px 18px -6px rgba(30, 43, 60, 0.3);
+      border: 1px solid #1e2b3c;
+    }
+    .btn-primary:hover { background: #2a3e55; transform: translateY(-1px); }
+
+    .btn-secondary { background: white; border: 1px solid #bac8dc; }
+    .btn-secondary:hover { background: #f0f5fe; border-color: #8fa7c4; }
+
+    .btn-danger {
+      background: #9b2c2c;
+      color: white;
+      border: 1px solid #7a2020;
+      box-shadow: 0 10px 18px -6px rgba(155, 44, 44, 0.3);
+    }
+    .btn-danger:hover { background: #b23a3a; transform: translateY(-1px); }
+
+    .btn:active { transform: translateY(1px); }
+    .btn:disabled { opacity: 0.45; pointer-events: none; filter: grayscale(0.5); }
+
+    .start-container {
+      display: flex;
+      justify-content: flex-end;
+      gap: 14px;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+
+    .election-panel { display: flex; flex-direction: column; gap: 30px; }
+
+    .voting-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      background: #f4f8ff;
+      border-radius: 28px;
+      padding: 22px;
+      border: 1px solid #d3e0f0;
+    }
+
+    .vote-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: white;
+      padding: 12px 12px 12px 28px;
+      border-radius: 80px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.02), 0 0 0 1px #e0e9f5;
+    }
+
+    .candidate-name {
+      font-size: 1.3rem;
+      font-weight: 550;
+      color: #11212e;
+      letter-spacing: -0.01em;
+    }
+
+    .vote-btn {
+      background: #eef3fc;
+      border: none;
+      border-radius: 40px;
+      padding: 12px 28px;
+      font-weight: 600;
+      color: #1e2b3c;
+      cursor: pointer;
+      transition: 0.12s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 1rem;
+      box-shadow: 0 0 0 1px #c2d2e9;
+    }
+    .vote-btn:hover { background: #1e2b3c; color: white; box-shadow: 0 8px 16px -6px #1e2b3c; }
+    .vote-btn:active { transform: scale(0.97); }
+
+    .chart-container {
+      background: white;
+      border-radius: 28px;
+      padding: 24px 20px 12px 20px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.04), 0 0 0 1px #e2ebf6;
+    }
+
+    .chart-container h3 {
+      font-weight: 500;
+      font-size: 1.2rem;
+      color: #3a4d62;
+      margin-bottom: 18px;
+      padding-left: 8px;
+    }
+
+    canvas { width: 100% !important; max-height: 280px; }
+
+    .status-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #4b637b;
+      font-size: 0.95rem;
+      padding: 0 6px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .badge {
+      background: #e2ecfe;
+      padding: 6px 14px;
+      border-radius: 60px;
+      font-weight: 500;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .file-status {
+      font-size: 0.85rem;
+      color: #3a6b4b;
+      background: #e1f5e8;
+      padding: 4px 12px;
+      border-radius: 40px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .file-status::before { content: "💾"; font-size: 0.9rem; }
+    .file-status.warning { background: #fff3e0; color: #a15e00; }
+
+    .top-candidates {
+      background: linear-gradient(145deg, #f4f8ff, #e9f0fa);
+      border-radius: 28px;
+      padding: 24px 28px;
+      border: 1px solid #d3e0f0;
+    }
+
+    .top-candidates h2 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #1e2b3c;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .top-list { display: flex; flex-direction: column; gap: 12px; }
+
+    .top-item {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: white;
+      padding: 14px 22px;
+      border-radius: 60px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.02), 0 0 0 1px #e0e9f5;
+      transition: transform 0.15s;
+    }
+    .top-item:hover { transform: translateX(4px); }
+
+    .rank-badge {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: white;
+      flex-shrink: 0;
+    }
+
+    .rank-1 { background: #d4a017; }
+    .rank-2 { background: #8a9aa8; }
+    .rank-3 { background: #b87333; }
+    .rank-4 { background: #6b7b8b; }
+    .rank-5 { background: #6b7b8b; }
+
+    .top-name { font-size: 1.2rem; font-weight: 550; color: #11212e; flex: 1; }
+
+    .top-votes {
+      font-weight: 600;
+      color: #3b6ea5;
+      font-size: 1.1rem;
+      background: #eef3fc;
+      padding: 6px 18px;
+      border-radius: 60px;
+    }
+
+    .winner-banner {
+      background: linear-gradient(135deg, #d4a017, #f0c75e);
+      color: #1e2b3c;
+      padding: 16px 24px;
+      border-radius: 60px;
+      font-weight: 700;
+      font-size: 1.3rem;
+      text-align: center;
+      box-shadow: 0 10px 24px -8px rgba(212, 160, 23, 0.5);
+    }
+
+    .info-note {
+      background: #fff8e1;
+      border-left: 4px solid #f0c040;
+      padding: 12px 18px;
+      border-radius: 12px;
+      font-size: 0.9rem;
+      color: #6b5200;
+      line-height: 1.5;
+    }
+
+    @keyframes pop {
+      0% { transform: scale(0.9); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    .footer-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+    /* Hidden file input */
+    #fileInputHidden { display: none; }
+  </style>
+</head>
+<body>
+<div class="app-container" id="appContainer"></div>
+
+<!-- Hidden file input used for loading results -->
+<input type="file" id="fileInputHidden" accept=".json,application/json">
+
+<script>
+  (function() {
+    // ---------- DATA ----------
+    let candidates = [];
+    let votes = {};
+    let candidateColors = {};
+    let electionStarted = false;
+    let electionEnded = false;
+    let chartInstance = null;
+
+    const STORAGE_KEY = 'classElectionResults';
+    const RESULTS_FILENAME = 'election_results.json';
+
+    const app = document.getElementById('appContainer');
+    const hiddenFileInput = document.getElementById('fileInputHidden');
+
+    // ---------- COLOR GENERATION ----------
+    function getRandomColor() {
+      const hue = Math.floor(Math.random() * 360);
+      const saturation = 60 + Math.floor(Math.random() * 25);
+      const lightness = 45 + Math.floor(Math.random() * 20);
+      return hslToHex(hue, saturation, lightness);
+    }
+
+    function hslToHex(h, s, l) {
+      s /= 100; l /= 100;
+      const a = s * Math.min(l, 1 - l);
+      const f = n => {
+        const k = (n + h / 30) % 12;
+        const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+        return Math.round(255 * color).toString(16).padStart(2, '0');
+      };
+      return `#${f(0)}${f(8)}${f(4)}`;
+    }
+
+    function assignColorsToCandidates() {
+      candidates.forEach(name => {
+        if (!candidateColors[name]) candidateColors[name] = getRandomColor();
+      });
+      Object.keys(candidateColors).forEach(name => {
+        if (!candidates.includes(name)) delete candidateColors[name];
+      });
+    }
+
+    // ---------- PERSISTENCE ----------
+    function buildDataObject() {
+      return {
+        candidates: [...candidates],
+        votes: { ...votes },
+        candidateColors: { ...candidateColors },
+        electionEnded: electionEnded,
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    function saveToLocalStorage() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(buildDataObject()));
+      } catch (e) {
+        console.warn('localStorage save failed:', e);
+      }
+    }
+
+    // Download JSON file with a FIXED filename so the browser overwrites it.
+    // This keeps the file "the same file" across saves (in the Downloads folder).
+    function saveToFile() {
+      try {
+        const data = buildDataObject();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = RESULTS_FILENAME;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        // Give the browser a moment before revoking
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        updateFileStatusBadge('ok');
+      } catch (e) {
+        console.warn('File save failed:', e);
+        updateFileStatusBadge('error');
+      }
+    }
+
+    function loadFromLocalStorage() {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (!stored) return false;
+      try {
+        const data = JSON.parse(stored);
+        if (data.candidates && Array.isArray(data.candidates) && data.votes) {
+          candidates = data.candidates;
+          votes = data.votes;
+          candidateColors = data.candidateColors || {};
+          electionEnded = !!data.electionEnded;
+          candidates.forEach(name => {
+            if (votes[name] === undefined) votes[name] = 0;
+          });
+          assignColorsToCandidates();
+          return true;
+        }
+      } catch (e) {
+        console.warn('Failed to parse stored results:', e);
+      }
+      return false;
+    }
+
+    function applyLoadedData(data) {
+      if (data.candidates && Array.isArray(data.candidates) && data.votes) {
+        candidates = data.candidates;
+        votes = data.votes;
+        candidateColors = data.candidateColors || {};
+        electionEnded = !!data.electionEnded;
+        candidates.forEach(name => {
+          if (votes[name] === undefined) votes[name] = 0;
+        });
+        assignColorsToCandidates();
+        return true;
+      }
+      return false;
+    }
+
+    function updateFileStatusBadge(status) {
+      const badge = document.getElementById('fileStatusBadge');
+      if (!badge) return;
+      if (status === 'ok') {
+        badge.textContent = 'Saved to ' + RESULTS_FILENAME;
+        badge.className = 'file-status';
+      } else if (status === 'error') {
+        badge.textContent = 'Save failed';
+        badge.className = 'file-status warning';
+      } else if (status === 'loaded') {
+        badge.textContent = 'Results loaded';
+        badge.className = 'file-status';
+      } else {
+        badge.textContent = 'Auto-save active';
+        badge.className = 'file-status';
+      }
+    }
+
+    // ---------- HELPERS ----------
+    function resetChart() {
+      if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+    }
+
+    function escapeHTML(str) {
+      return String(str).replace(/[&<>"]/g, m => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'
+      })[m]);
+    }
+
+    function getTotalVotes() {
+      return Object.values(votes).reduce((sum, v) => sum + (v || 0), 0);
+    }
+
+    // Trigger hidden file input
+    function pickResultsFile() {
+      hiddenFileInput.value = ''; // reset so same file can be re-picked
+      hiddenFileInput.click();
+    }
+
+    // Handler for hidden file input
+    hiddenFileInput.addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const data = JSON.parse(evt.target.result);
+          if (applyLoadedData(data)) {
+            saveToLocalStorage();
+            alert('Results loaded successfully from "' + file.name + '".');
+            if (electionEnded) renderEndScreen();
+            else if (candidates.length > 0 && electionStarted) renderElectionScreen();
+            else renderSetupScreen();
+          } else {
+            alert('The selected file does not contain valid election data.');
+          }
+        } catch (err) {
+          alert('Could not parse the file: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    // ---------- RENDER SETUP SCREEN ----------
+    function renderSetupScreen() {
+      resetChart();
+      electionStarted = false;
+      electionEnded = false;
+
+      const candidatePillsHTML = candidates.length
+        ? candidates.map(name => `<div class="candidate-pill">${escapeHTML(name)}</div>`).join('')
+        : '<div class="empty-message">No candidates added yet.</div>';
+
+      app.innerHTML = `
+        <h1>🗳️ Class Elections for Α.21 <span>setup</span></h1>
+        <div class="setup-panel">
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <label style="font-weight: 500; color: #2d4055;">Candidates</label>
+              <span class="badge">👥 ${candidates.length}</span>
+            </div>
+            <div class="candidate-list" id="candidateList">
+              ${candidatePillsHTML}
+            </div>
+          </div>
+          <div class="add-section">
+            <input type="text" id="candidateInput" placeholder="Enter student name" autocomplete="off">
+            <button class="btn btn-secondary" id="addCandidateBtn">+ Add candidate</button>
+          </div>
+          <div class="start-container">
+            <button class="btn btn-secondary" id="loadResultsBtn">📂 Load results file</button>
+            <button class="btn btn-primary" id="startElectionBtn" ${candidates.length === 0 ? 'disabled' : ''}>
+              ▶ Start election
+            </button>
+          </div>
+          <div class="footer-actions">
+            <button class="btn btn-secondary" id="clearSavedBtn">🗑️ Clear saved data</button>
+          </div>
+          <div class="info-note">
+            <strong>How saving works:</strong> When the election starts, an <code>election_results.json</code>
+            file is downloaded. Every vote updates this file automatically (the browser overwrites the
+            same file in your Downloads folder) and also saves to your browser's local storage.
+            Use <em>Load results file</em> to restore from a saved JSON file.
+          </div>
+        </div>
+      `;
+
+      const addBtn = document.getElementById('addCandidateBtn');
+      const inputField = document.getElementById('candidateInput');
+      const startBtn = document.getElementById('startElectionBtn');
+      const clearBtn = document.getElementById('clearSavedBtn');
+      const loadBtn = document.getElementById('loadResultsBtn');
+
+      const addCandidate = () => {
+        const rawName = inputField.value.trim();
+        if (!rawName) { alert('Please enter a name.'); return; }
+        if (candidates.includes(rawName)) { alert('Candidate already exists!'); return; }
+        candidates.push(rawName);
+        votes[rawName] = 0;
+        candidateColors[rawName] = getRandomColor();
+        inputField.value = '';
+        renderSetupScreen();
+        document.getElementById('candidateInput')?.focus();
+      };
+
+      addBtn.addEventListener('click', addCandidate);
+      inputField.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); addCandidate(); }
+      });
+
+      startBtn.addEventListener('click', () => {
+        if (candidates.length === 0) return;
+        candidates.forEach(name => {
+          if (votes[name] === undefined) votes[name] = 0;
+          if (!candidateColors[name]) candidateColors[name] = getRandomColor();
+        });
+        electionStarted = true;
+        electionEnded = false;
+
+        // Initial save: localStorage + auto-download of results file
+        saveToLocalStorage();
+        saveToFile();
+
+        renderElectionScreen();
+      });
+
+      loadBtn.addEventListener('click', pickResultsFile);
+
+      clearBtn.addEventListener('click', () => {
+        if (confirm('Delete all saved election data from localStorage?')) {
+          localStorage.removeItem(STORAGE_KEY);
+          alert('Saved data cleared. You can start fresh.');
+        }
+      });
+    }
+
+    // ---------- RENDER ELECTION SCREEN ----------
+    function renderElectionScreen() {
+      resetChart();
+
+      const voteRowsHTML = candidates.map(name => `
+        <div class="vote-row">
+          <span class="candidate-name">${escapeHTML(name)}</span>
+          <button class="vote-btn" data-candidate="${escapeHTML(name)}">
+            <span>+1</span> Vote
+          </button>
+        </div>
+      `).join('');
+
+      app.innerHTML = `
+        <h1>🗳️ Class Elections <span>live</span></h1>
+        <div class="election-panel">
+          <div class="voting-grid" id="votingGrid">
+            ${voteRowsHTML}
+          </div>
+          <div class="chart-container">
+            <h3>📊 Current results</h3>
+            <canvas id="resultsChart"></canvas>
+          </div>
+          <div class="status-bar">
+            <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+              <div class="badge">🗳️ Total votes: <span id="totalVotesDisplay">0</span></div>
+              <div class="file-status" id="fileStatusBadge">Auto-save active</div>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" id="backToSetupBtn" style="padding: 10px 24px;">← Edit candidates</button>
+              <button class="btn btn-danger" id="endElectionBtn" style="padding: 10px 24px;">🏁 End election</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.querySelectorAll('.vote-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const candidateName = e.currentTarget.dataset.candidate;
+          if (!candidateName) return;
+          votes[candidateName] = (votes[candidateName] || 0) + 1;
+
+          // Save automatically: localStorage + file download
+          saveToLocalStorage();
+          saveToFile();
+
+          updateChart();
+          updateTotalVotesDisplay();
+        });
+      });
+
+      document.getElementById('backToSetupBtn')?.addEventListener('click', () => {
+        electionStarted = false;
+        renderSetupScreen();
+      });
+
+      document.getElementById('endElectionBtn')?.addEventListener('click', () => {
+        if (confirm('End the election? No more votes will be accepted.')) {
+          electionEnded = true;
+          electionStarted = false;
+          saveToLocalStorage();
+          saveToFile();
+          renderEndScreen();
+        }
+      });
+
+      initChart();
+      updateTotalVotesDisplay();
+      updateFileStatusBadge('ok');
+    }
+
+    // ---------- RENDER END SCREEN ----------
+    function renderEndScreen() {
+      resetChart();
+
+      const sorted = [...candidates]
+        .map(name => ({ name, votes: votes[name] || 0 }))
+        .sort((a, b) => b.votes - a.votes)
+        .slice(0, 5);
+
+      const totalVotes = getTotalVotes();
+      const winner = sorted[0];
+
+      const rankClasses = ['rank-1', 'rank-2', 'rank-3', 'rank-4', 'rank-5'];
+      const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+
+      const topListHTML = sorted.map((item, index) => `
+        <div class="top-item">
+          <div class="rank-badge ${rankClasses[index]}">${medals[index]}</div>
+          <span class="top-name">${escapeHTML(item.name)}</span>
+          <span class="top-votes">${item.votes} vote${item.votes !== 1 ? 's' : ''}</span>
+        </div>
+      `).join('');
+
+      app.innerHTML = `
+        <h1>🗳️ Class Elections <span>results</span></h1>
+        <div class="election-panel">
+          <div class="winner-banner">
+            🎉 Winner: ${escapeHTML(winner.name)} with ${winner.votes} vote${winner.votes !== 1 ? 's' : ''}! 🎉
+          </div>
+          <div class="top-candidates">
+            <h2>🏆 Top 5 Candidates</h2>
+            <div class="top-list">
+              ${topListHTML}
+            </div>
+          </div>
+          <div class="chart-container">
+            <h3>📊 Final results (top 5)</h3>
+            <canvas id="resultsChart"></canvas>
+          </div>
+          <div class="status-bar">
+            <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+              <div class="badge">🗳️ Total votes: ${totalVotes}</div>
+              <div class="file-status" id="fileStatusBadge">Results saved</div>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button class="btn btn-secondary" id="loadResultsBtn" style="padding: 10px 24px;">📂 Load another file</button>
+              <button class="btn btn-primary" id="backToSetupBtn" style="padding: 10px 24px;">← New election</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('backToSetupBtn')?.addEventListener('click', () => {
+        electionEnded = false;
+        electionStarted = false;
+        renderSetupScreen();
+      });
+
+      document.getElementById('loadResultsBtn')?.addEventListener('click', pickResultsFile);
+
+      const ctx = document.getElementById('resultsChart')?.getContext('2d');
+      if (!ctx) return;
+
+      const labels = sorted.map(item => item.name);
+      const dataValues = sorted.map(item => item.votes);
+      const backgroundColors = sorted.map(item => candidateColors[item.name] || '#3b6ea5');
+
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Votes',
+            data: dataValues,
+            backgroundColor: backgroundColors,
+            borderColor: '#1e2b3c',
+            borderWidth: 1.5,
+            borderRadius: 8,
+            barPercentage: 0.65,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          animation: { duration: 400 },
+          plugins: {
+            legend: { display: false },
+            tooltip: { backgroundColor: '#1e2b3c', cornerRadius: 8 }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { stepSize: 1, precision: 0, color: '#345' },
+              grid: { color: '#e2eaf3' }
+            },
+            x: {
+              ticks: { color: '#1e2b3c', font: { weight: '500' } },
+              grid: { display: false }
+            }
+          }
+        }
+      });
+
+      updateFileStatusBadge('ok');
+    }
+
+    // ---------- CHART HANDLING ----------
+    function initChart() {
+      const ctx = document.getElementById('resultsChart')?.getContext('2d');
+      if (!ctx) return;
+
+      const labels = candidates;
+      const dataValues = candidates.map(name => votes[name] || 0);
+      const backgroundColors = candidates.map(name => candidateColors[name] || '#3b6ea5');
+
+      if (chartInstance) chartInstance.destroy();
+
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Votes',
+            data: dataValues,
+            backgroundColor: backgroundColors,
+            borderColor: '#1e2b3c',
+            borderWidth: 1.5,
+            borderRadius: 8,
+            barPercentage: 0.65,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: true,
+          animation: { duration: 250 },
+          plugins: {
+            legend: { display: false },
+            tooltip: { backgroundColor: '#1e2b3c', cornerRadius: 8 }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { stepSize: 1, precision: 0, color: '#345' },
+              grid: { color: '#e2eaf3' }
+            },
+            x: {
+              ticks: { color: '#1e2b3c', font: { weight: '500' } },
+              grid: { display: false }
+            }
+          }
+        }
+      });
+    }
+
+    function updateChart() {
+      if (!chartInstance) return;
+      chartInstance.data.datasets[0].data = candidates.map(name => votes[name] || 0);
+      chartInstance.data.datasets[0].backgroundColor = candidates.map(name => candidateColors[name] || '#3b6ea5');
+      chartInstance.update();
+    }
+
+    function updateTotalVotesDisplay() {
+      const totalSpan = document.getElementById('totalVotesDisplay');
+      if (totalSpan) totalSpan.textContent = getTotalVotes();
+    }
+
+    // ---------- INITIAL LOAD ----------
+    function initApp() {
+      const loaded = loadFromLocalStorage();
+      if (loaded && candidates.length > 0) {
+        // Restore prior session
+        if (electionEnded) {
+          renderEndScreen();
+        } else {
+          renderSetupScreen();
+        }
+      } else {
+        candidates = [];
+        votes = {};
+        candidateColors = {};
+        electionStarted = false;
+        electionEnded = false;
+        renderSetupScreen();
+      }
+    }
+
+    initApp();
+  })();
+</script>
+</body>
+</html>
