@@ -115,6 +115,7 @@
       box-shadow: 0 4px 10px rgba(0,0,0,0.03), 0 0 0 1px #cbd5e1;
       color: #1e2b3c;
       text-decoration: none;
+      font-family: inherit;
     }
 
     .btn-primary {
@@ -190,9 +191,11 @@
       gap: 8px;
       font-size: 1rem;
       box-shadow: 0 0 0 1px #c2d2e9;
+      font-family: inherit;
     }
     .vote-btn:hover { background: #1e2b3c; color: white; box-shadow: 0 8px 16px -6px #1e2b3c; }
     .vote-btn:active { transform: scale(0.97); }
+    .vote-btn:disabled { opacity: 0.5; pointer-events: none; }
 
     .chart-container {
       background: white;
@@ -236,14 +239,23 @@
       font-size: 0.85rem;
       color: #3a6b4b;
       background: #e1f5e8;
-      padding: 4px 12px;
+      padding: 5px 14px;
       border-radius: 40px;
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      border: none;
+      font-family: inherit;
+      font-weight: 500;
+      cursor: pointer;
+      transition: 0.15s;
     }
     .file-status::before { content: "💾"; font-size: 0.9rem; }
+    .file-status:hover { filter: brightness(0.95); }
     .file-status.warning { background: #fff3e0; color: #a15e00; }
+    .file-status.warning::before { content: "🔗"; }
+    .file-status.error { background: #fde8e8; color: #9b2c2c; }
+    .file-status.error::before { content: "⚠️"; }
 
     .top-candidates {
       background: linear-gradient(145deg, #f4f8ff, #e9f0fa);
@@ -326,6 +338,11 @@
       color: #6b5200;
       line-height: 1.5;
     }
+    .info-note code {
+      background: rgba(0,0,0,0.06);
+      padding: 1px 5px;
+      border-radius: 5px;
+    }
 
     @keyframes pop {
       0% { transform: scale(0.9); opacity: 0; }
@@ -354,8 +371,18 @@
     let electionEnded = false;
     let chartInstance = null;
 
+    // File System Access state
+    let fileHandle = null;          // FileSystemFileHandle used for silent overwrite writes
+    const supportsFS = typeof window.showSaveFilePicker === 'function';
+
     const STORAGE_KEY = 'classElectionResults';
     const RESULTS_FILENAME = 'election_results.json';
+
+    // IndexedDB (used ONLY to remember the file handle between page reloads;
+    // file handles cannot be stored in localStorage)
+    const DB_NAME = 'classElectionFileStore';
+    const STORE_NAME = 'handles';
+    const HANDLE_KEY = 'resultsFileHandle';
 
     const app = document.getElementById('appContainer');
     const hiddenFileInput = document.getElementById('fileInputHidden');
@@ -388,7 +415,7 @@
       });
     }
 
-    // ---------- PERSISTENCE ----------
+    // ---------- PERSISTENCE (localStorage) ----------
     function buildDataObject() {
       return {
         candidates: [...candidates],
@@ -407,26 +434,183 @@
       }
     }
 
-    // Download JSON file with a FIXED filename so the browser overwrites it.
-    // This keeps the file "the same file" across saves (in the Downloads folder).
-    function saveToFile() {
+    // ---------- INDEXEDDB HELPERS (for storing the file handle) ----------
+    function idbOpen() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    function idbSet(key, value) {
+      return idbOpen().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).put(value, key);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+      }));
+    }
+
+    function idbGet(key) {
+      return idbOpen().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const r = tx.objectStore(STORE_NAME).get(key);
+        r.onsuccess = () => { db.close(); resolve(r.result); };
+        r.onerror = () => { db.close(); reject(r.error); };
+      }));
+    }
+
+    function idbDelete(key) {
+      return idbOpen().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).delete(key);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+      })).catch(() => {});
+    }
+
+    // ---------- FILE SYSTEM ACCESS (silent overwrite) ----------
+
+    // Ask for (or just check) write permission on a stored handle.
+    async function verifyPermission(handle, withPrompt) {
+      if (!handle) return false;
+      if (typeof handle.queryPermission !== 'function') return true; // assume granted
+      const opts = { mode: 'readwrite' };
       try {
-        const data = buildDataObject();
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = RESULTS_FILENAME;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        // Give the browser a moment before revoking
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        updateFileStatusBadge('ok');
+        if (await handle.queryPermission(opts) === 'granted') return true;
+        if (withPrompt && typeof handle.requestPermission === 'function') {
+          return (await handle.requestPermission(opts)) === 'granted';
+        }
       } catch (e) {
-        console.warn('File save failed:', e);
-        updateFileStatusBadge('error');
+        console.warn('Permission check failed:', e);
       }
+      return false;
+    }
+
+    // Restore a previously linked file handle (survives page reloads).
+    async function restoreFileHandle() {
+      if (!supportsFS) return null;
+      try {
+        const h = await idbGet(HANDLE_KEY);
+        if (h && typeof h.createWritable === 'function') {
+          fileHandle = h;
+          return fileHandle;
+        }
+      } catch (e) {
+        console.warn('Could not restore file handle:', e);
+      }
+      return null;
+    }
+
+    // Actually overwrite the file (no dialog).
+    async function writeToHandle(data) {
+      const writable = await fileHandle.createWritable();
+      await writable.write(JSON.stringify(data, null, 2));
+      await writable.close();
+    }
+
+    // Opens the picker ONCE and remembers the file. Afterwards every save is silent.
+    async function pickResultsFileHandle() {
+      if (!supportsFS) return false;
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: RESULTS_FILENAME,
+          types: [{
+            description: 'JSON file',
+            accept: { 'application/json': ['.json'] }
+          }]
+        });
+        fileHandle = handle;
+        await idbSet(HANDLE_KEY, handle);
+        await writeToHandle(buildDataObject());
+        updateFileStatusBadge('ok');
+        return true;
+      } catch (e) {
+        if (e && e.name === 'AbortError') {
+          updateFileStatusBadge('unlinked');
+          return false;
+        }
+        console.warn('File picker failed:', e);
+        updateFileStatusBadge('error');
+        return false;
+      }
+    }
+
+    // Fallback for browsers without the File System Access API
+    // (Firefox / Safari): classic download. May create "(1)" copies.
+    function downloadResultsFile(data) {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = RESULTS_FILENAME;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    /**
+     * Main save routine.
+     * - If a file is linked -> silently overwrites election_results.json
+     * - Otherwise           -> falls back to a download
+     * `allowPrompt` should be true when called from a user gesture (click).
+     */
+    async function saveToFile({ allowPrompt = true } = {}) {
+      const data = buildDataObject();
+
+      if (supportsFS && fileHandle) {
+        try {
+          const granted = await verifyPermission(fileHandle, allowPrompt);
+          if (granted) {
+            await writeToHandle(data);
+            updateFileStatusBadge('ok');
+            return true;
+          }
+          updateFileStatusBadge('unlinked');
+          return false;
+        } catch (e) {
+          // Handle went stale (file moved/deleted/permission revoked)
+          console.warn('Write failed, re-linking required:', e);
+          fileHandle = null;
+          await idbDelete(HANDLE_KEY);
+          updateFileStatusBadge('unlinked');
+          return false;
+        }
+      }
+
+      // No File System Access API support, or no handle yet
+      if (!supportsFS) {
+        downloadResultsFile(data);
+        updateFileStatusBadge('download');
+        return true;
+      }
+
+      updateFileStatusBadge('unlinked');
+      return false;
+    }
+
+    // Ensure a file is linked; used on "Start election" / re-link clicks.
+    async function ensureFileLinked() {
+      if (!supportsFS) {
+        // No API: just do a download so the user has the file
+        downloadResultsFile(buildDataObject());
+        updateFileStatusBadge('download');
+        return true;
+      }
+
+      if (fileHandle && await verifyPermission(fileHandle, true)) {
+        await saveToFile({ allowPrompt: true });
+        return true;
+      }
+
+      // Ask the user once where to put the file
+      return await pickResultsFileHandle();
     }
 
     function loadFromLocalStorage() {
@@ -466,21 +650,35 @@
       return false;
     }
 
+    // ---------- STATUS BADGE ----------
     function updateFileStatusBadge(status) {
       const badge = document.getElementById('fileStatusBadge');
       if (!badge) return;
-      if (status === 'ok') {
-        badge.textContent = 'Saved to ' + RESULTS_FILENAME;
-        badge.className = 'file-status';
-      } else if (status === 'error') {
-        badge.textContent = 'Save failed';
-        badge.className = 'file-status warning';
-      } else if (status === 'loaded') {
-        badge.textContent = 'Results loaded';
-        badge.className = 'file-status';
-      } else {
-        badge.textContent = 'Auto-save active';
-        badge.className = 'file-status';
+
+      switch (status) {
+        case 'ok':
+          badge.textContent = 'Auto-saving to ' + RESULTS_FILENAME;
+          badge.className = 'file-status';
+          break;
+        case 'unlinked':
+          badge.textContent = 'Link results file (click)';
+          badge.className = 'file-status warning';
+          break;
+        case 'download':
+          badge.textContent = 'Downloading ' + RESULTS_FILENAME;
+          badge.className = 'file-status warning';
+          break;
+        case 'error':
+          badge.textContent = 'Save failed';
+          badge.className = 'file-status error';
+          break;
+        case 'loaded':
+          badge.textContent = 'Results loaded';
+          badge.className = 'file-status';
+          break;
+        default:
+          badge.textContent = 'Auto-save active';
+          badge.className = 'file-status';
       }
     }
 
@@ -499,13 +697,12 @@
       return Object.values(votes).reduce((sum, v) => sum + (v || 0), 0);
     }
 
-    // Trigger hidden file input
-    function pickResultsFile() {
-      hiddenFileInput.value = ''; // reset so same file can be re-picked
+    // Trigger hidden file input (for LOADING results)
+    function pickResultsFileToLoad() {
+      hiddenFileInput.value = '';
       hiddenFileInput.click();
     }
 
-    // Handler for hidden file input
     hiddenFileInput.addEventListener('change', (e) => {
       const file = e.target.files && e.target.files[0];
       if (!file) return;
@@ -565,10 +762,12 @@
             <button class="btn btn-secondary" id="clearSavedBtn">🗑️ Clear saved data</button>
           </div>
           <div class="info-note">
-            <strong>How saving works:</strong> When the election starts, an <code>election_results.json</code>
-            file is downloaded. Every vote updates this file automatically (the browser overwrites the
-            same file in your Downloads folder) and also saves to your browser's local storage.
-            Use <em>Load results file</em> to restore from a saved JSON file.
+            <strong>How saving works:</strong> when you start the election you pick
+            <code>${RESULTS_FILENAME}</code> <em>once</em>. From then on, every vote silently
+            overwrites that same file — no save dialog. The choice is remembered, so it keeps
+            working after a page reload (you may get a one-time “allow editing” confirmation).
+            Results are also mirrored to browser local storage.
+            ${supportsFS ? '' : '<br><br><strong>Note:</strong> your browser does not support silent file writing, so each save downloads a new copy of the file instead.'}
           </div>
         </div>
       `;
@@ -596,7 +795,7 @@
         if (e.key === 'Enter') { e.preventDefault(); addCandidate(); }
       });
 
-      startBtn.addEventListener('click', () => {
+      startBtn.addEventListener('click', async () => {
         if (candidates.length === 0) return;
         candidates.forEach(name => {
           if (votes[name] === undefined) votes[name] = 0;
@@ -605,18 +804,28 @@
         electionStarted = true;
         electionEnded = false;
 
-        // Initial save: localStorage + auto-download of results file
         saveToLocalStorage();
-        saveToFile();
+
+        // Link the results file (shows the picker only the FIRST time)
+        const linked = await ensureFileLinked();
 
         renderElectionScreen();
+
+        if (!linked) {
+          // User cancelled the picker — keep going, badge will ask them to link
+          updateFileStatusBadge(supportsFS ? 'unlinked' : 'download');
+        } else {
+          await saveToFile({ allowPrompt: true });
+        }
       });
 
-      loadBtn.addEventListener('click', pickResultsFile);
+      loadBtn.addEventListener('click', pickResultsFileToLoad);
 
-      clearBtn.addEventListener('click', () => {
+      clearBtn.addEventListener('click', async () => {
         if (confirm('Delete all saved election data from localStorage?')) {
           localStorage.removeItem(STORAGE_KEY);
+          await idbDelete(HANDLE_KEY);
+          fileHandle = null;
           alert('Saved data cleared. You can start fresh.');
         }
       });
@@ -648,7 +857,7 @@
           <div class="status-bar">
             <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
               <div class="badge">🗳️ Total votes: <span id="totalVotesDisplay">0</span></div>
-              <div class="file-status" id="fileStatusBadge">Auto-save active</div>
+              <button class="file-status" id="fileStatusBadge" title="Click to choose or re-link the results file">Auto-save active</button>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
               <button class="btn btn-secondary" id="backToSetupBtn" style="padding: 10px 24px;">← Edit candidates</button>
@@ -659,18 +868,33 @@
       `;
 
       document.querySelectorAll('.vote-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
+        btn.addEventListener('click', async (e) => {
           const candidateName = e.currentTarget.dataset.candidate;
           if (!candidateName) return;
+
           votes[candidateName] = (votes[candidateName] || 0) + 1;
 
-          // Save automatically: localStorage + file download
           saveToLocalStorage();
-          saveToFile();
-
           updateChart();
           updateTotalVotesDisplay();
+
+          // Silent overwrite of the SAME file. If the file isn't linked yet,
+          // this click is the user gesture that lets us link it.
+          if (supportsFS && !fileHandle) {
+            const linked = await ensureFileLinked();
+            if (!linked) return;
+          }
+          await saveToFile({ allowPrompt: true });
         });
+      });
+
+      document.getElementById('fileStatusBadge')?.addEventListener('click', async () => {
+        // Re-link / change the target file
+        if (supportsFS) {
+          await pickResultsFileHandle();
+        } else {
+          await saveToFile({ allowPrompt: false });
+        }
       });
 
       document.getElementById('backToSetupBtn')?.addEventListener('click', () => {
@@ -678,19 +902,21 @@
         renderSetupScreen();
       });
 
-      document.getElementById('endElectionBtn')?.addEventListener('click', () => {
+      document.getElementById('endElectionBtn')?.addEventListener('click', async () => {
         if (confirm('End the election? No more votes will be accepted.')) {
           electionEnded = true;
           electionStarted = false;
           saveToLocalStorage();
-          saveToFile();
+          await saveToFile({ allowPrompt: true });
           renderEndScreen();
         }
       });
 
       initChart();
       updateTotalVotesDisplay();
-      updateFileStatusBadge('ok');
+
+      if (supportsFS && fileHandle) updateFileStatusBadge('ok');
+      else updateFileStatusBadge(supportsFS ? 'unlinked' : 'download');
     }
 
     // ---------- RENDER END SCREEN ----------
@@ -735,7 +961,7 @@
           <div class="status-bar">
             <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
               <div class="badge">🗳️ Total votes: ${totalVotes}</div>
-              <div class="file-status" id="fileStatusBadge">Results saved</div>
+              <button class="file-status" id="fileStatusBadge" title="Click to choose or re-link the results file">Results saved</button>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
               <button class="btn btn-secondary" id="loadResultsBtn" style="padding: 10px 24px;">📂 Load another file</button>
@@ -751,7 +977,12 @@
         renderSetupScreen();
       });
 
-      document.getElementById('loadResultsBtn')?.addEventListener('click', pickResultsFile);
+      document.getElementById('loadResultsBtn')?.addEventListener('click', pickResultsFileToLoad);
+
+      document.getElementById('fileStatusBadge')?.addEventListener('click', async () => {
+        if (supportsFS) await pickResultsFileHandle();
+        else await saveToFile({ allowPrompt: false });
+      });
 
       const ctx = document.getElementById('resultsChart')?.getContext('2d');
       if (!ctx) return;
@@ -796,7 +1027,7 @@
         }
       });
 
-      updateFileStatusBadge('ok');
+      updateFileStatusBadge(supportsFS && fileHandle ? 'ok' : (supportsFS ? 'unlinked' : 'download'));
     }
 
     // ---------- CHART HANDLING ----------
@@ -860,10 +1091,12 @@
     }
 
     // ---------- INITIAL LOAD ----------
-    function initApp() {
+    async function initApp() {
+      // Try to restore a previously linked results file
+      await restoreFileHandle();
+
       const loaded = loadFromLocalStorage();
       if (loaded && candidates.length > 0) {
-        // Restore prior session
         if (electionEnded) {
           renderEndScreen();
         } else {
